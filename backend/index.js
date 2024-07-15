@@ -1,8 +1,10 @@
-const DerivAPIBasic = require('@deriv/deriv-api/dist/DerivAPIBasic');
-const WebSocket = require('ws');
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
+const axios = require("axios");
+const https = require("https");
+const WebSocket = require('ws');
+const DerivAPIBasic = require('@deriv/deriv-api/dist/DerivAPIBasic');
 
 const app = express();
 app.use(cors());
@@ -14,29 +16,30 @@ const appId = 62729;
 const connection = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${appId}`);
 const api = new DerivAPIBasic({ connection });
 
-// Subscribe to tick updates for the stock symbol R_100
-const tickStream = () => api.subscribe({ ticks: 'R_100' });
+// Ignore SSL certificate errors
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
-const tickResponse = async (res) => {
-    const data = JSON.parse(res.data);
+// Disable SSL certificate verification globally
+//process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-    if (data.error !== undefined) {
-        console.log('Error: ' + data.error.message);
-        connection.removeEventListener('message', tickResponse, false);
-        await api.disconnect();
+// Endpoint to fetch the last n ticks for
+app.get('/api/ticks', async (req, res) => {
+    const { symbol, count } = req.query;
+    console.log(`Symbol: ${symbol}, Count: ${count}`);
+
+    if(!symbol || !count) {
+        return res.status(400).send({ error: "Symbol and count are required parameters" });
     }
 
-    if (data.msg_type === 'tick') {
-        console.log(data.tick);
+    try {
+        const url = `https://api.deriv.com/v3/price_ticker?symbol=${symbol}&count=${count}`;
+        const response = await axios.get(url);
+        res.send(response.data.ticks);
+    } catch (error) {
+        console.error('Error fetching ticks:', error);
+        res.status(500).send({ error: 'Error fetching ticks' });
     }
-};
-
-const subscribeTicks = async () => {
-    await tickStream();
-    connection.addEventListener("message", tickResponse);
-};
-
-subscribeTicks();
+ });
 
 // WebSocket server for clients to connect to
 const wss = new WebSocket.Server({ server });
